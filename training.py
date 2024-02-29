@@ -1,4 +1,4 @@
-from main import ModelConfiguration
+from config import ModelConfiguration, configure_logging
 import keras
 from keras import ops
 import keras_nlp
@@ -6,7 +6,9 @@ import math
 import plotly.express as px
 import numpy as np
 
-# LOSS AND METRICS
+logging = configure_logging()  # Configure logging from config.py
+
+# LOSS 
 class CrossEntropy(keras.losses.SparseCategoricalCrossentropy):
     def __init__(self, ignore_class=-100, reduction=None, **args):
         super().__init__(reduction=reduction, **args)
@@ -26,7 +28,8 @@ class CrossEntropy(keras.losses.SparseCategoricalCrossentropy):
         else:
             loss = ops.mean(loss)
         return loss
-    
+
+# METRICS    
 class FBetaScore(keras.metrics.FBetaScore):
     def __init__(self, ignore_classes=[-100, 12], average="micro", beta=5.0,
                  name="f5_score", **args):
@@ -69,82 +72,90 @@ class FBetaScore(keras.metrics.FBetaScore):
 
 # LEARNING RATE SETUP
 def get_lr_callback(batch_size=8, mode='cos', epochs=10, plot=False):
-    lr_start, lr_max, lr_min = 6e-6, 2.5e-6 * batch_size, 1e-6
-    lr_ramp_ep, lr_sus_ep, lr_decay = 3, 0, 0.75
+    try:
+        lr_start, lr_max, lr_min = 6e-6, 2.5e-6 * batch_size, 1e-6
+        lr_ramp_ep, lr_sus_ep, lr_decay = 3, 0, 0.75
 
-    def lrfn(epoch):  # Learning rate update function
-        if epoch < lr_ramp_ep: lr = (lr_max - lr_start) / lr_ramp_ep * epoch + lr_start
-        elif epoch < lr_ramp_ep + lr_sus_ep: lr = lr_max
-        elif mode == 'exp': lr = (lr_max - lr_min) * lr_decay**(epoch - lr_ramp_ep - lr_sus_ep) + lr_min
-        elif mode == 'step': lr = lr_max * lr_decay**((epoch - lr_ramp_ep - lr_sus_ep) // 2)
-        elif mode == 'cos':
-            decay_total_epochs, decay_epoch_index = epochs - lr_ramp_ep - lr_sus_ep + 3, epoch - lr_ramp_ep - lr_sus_ep
-            phase = math.pi * decay_epoch_index / decay_total_epochs
-            lr = (lr_max - lr_min) * 0.5 * (1 + math.cos(phase)) + lr_min
-        return lr
+        def lrfn(epoch):  # Learning rate update function
+            if epoch < lr_ramp_ep: lr = (lr_max - lr_start) / lr_ramp_ep * epoch + lr_start
+            elif epoch < lr_ramp_ep + lr_sus_ep: lr = lr_max
+            elif mode == 'exp': lr = (lr_max - lr_min) * lr_decay**(epoch - lr_ramp_ep - lr_sus_ep) + lr_min
+            elif mode == 'step': lr = lr_max * lr_decay**((epoch - lr_ramp_ep - lr_sus_ep) // 2)
+            elif mode == 'cos':
+                decay_total_epochs, decay_epoch_index = epochs - lr_ramp_ep - lr_sus_ep + 3, epoch - lr_ramp_ep - lr_sus_ep
+                phase = math.pi * decay_epoch_index / decay_total_epochs
+                lr = (lr_max - lr_min) * 0.5 * (1 + math.cos(phase)) + lr_min
+            return lr
 
-    if plot:  # Plot lr curve if plot is True
-        fig = px.line(x=np.arange(epochs),
-                      y=[lrfn(epoch) for epoch in np.arange(epochs)], 
-                      title='LR Scheduler',
-                      markers=True,
-                      labels={'x': 'epoch', 'y': 'lr'})
-        fig.update_layout(
-            yaxis = dict(
-                showexponent = 'all',
-                exponentformat = 'e'
+        if plot:  # Plot lr curve if plot is True
+            fig = px.line(x=np.arange(epochs),
+                        y=[lrfn(epoch) for epoch in np.arange(epochs)], 
+                        title='LR Scheduler',
+                        markers=True,
+                        labels={'x': 'epoch', 'y': 'lr'})
+            fig.update_layout(
+                yaxis = dict(
+                    showexponent = 'all',
+                    exponentformat = 'e'
+                )
             )
-        )
-        fig.show()
+            fig.show()
 
-    return keras.callbacks.LearningRateScheduler(lrfn, verbose=False)  # Create lr callback
+        return keras.callbacks.LearningRateScheduler(lrfn, verbose=False)  # Create lr callback
+    except Exception as e:
+        logging.error(f"Error: Please check if the *get_lr_callback() training.py* exists and work properly. \n{e}")
+        raise
 
 # Your model architecture code here
 def create_model():
-    # ...
-    # BUILDING THE MODEL
-    print("TRAINING: Creating the model ...")
-    backbone = keras_nlp.models.DebertaV3Backbone.from_preset(
-        ModelConfiguration.preset,
-    )
-    out = backbone.output
-    out = keras.layers.Dense(ModelConfiguration.num_labels, name="logits")(out)
-    out = keras.layers.Activation("softmax", dtype="float32", name="prediction")(out)
-    model = keras.models.Model(backbone.input, out)
+    try:
+        # BUILDING THE MODEL
+        logging.info("TRAINING: Creating the model ...")
+        backbone = keras_nlp.models.DebertaV3Backbone.from_preset(
+            ModelConfiguration.preset,
+        )
+        out = backbone.output
+        out = keras.layers.Dense(ModelConfiguration.num_labels, name="logits")(out)
+        out = keras.layers.Activation("softmax", dtype="float32", name="prediction")(out)
+        model = keras.models.Model(backbone.input, out)
 
-    # Compile model for optimizer, loss and metric
-    model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=2e-5),
-        loss=CrossEntropy(),
-        metrics=[FBetaScore()],
-    )
-
+        # Compile model for optimizer, loss and metric
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=2e-5),
+            loss=CrossEntropy(),
+            metrics=[FBetaScore()],
+        )
+    except Exception as e:
+        logging.error(f"Error: Please check if the *create_model() training.py* exists and work properly. \n{e}")
+        raise
 
 # Your training code here
 def train_model(processed_train_data, InputData):
-    # ...
-    lr_cb = get_lr_callback(ModelConfiguration.train_batch_size, mode=ModelConfiguration.lr_mode, plot=True)
-    model = create_model()
+    try:    
+        lr_cb = get_lr_callback(ModelConfiguration.train_batch_size, mode=ModelConfiguration.lr_mode, plot=True)
+        model = create_model()
 
-    # TRAINING
-    if ModelConfiguration.train:
-        print("TRAINING: Training the model ...")
-        train_ds, valid_ds = processed_train_data
-        history = model.fit(
-            train_ds,
-            validation_data=valid_ds,
-            epochs=ModelConfiguration.epochs,
-            callbacks=[lr_cb],
-            verbose=1,
-        )
-        model.save_weights("model.weights.h5")
-        model.evaluate(valid_ds, return_dict=True, verbose=0)
+        # TRAINING
+        if ModelConfiguration.train:
+            logging.info("TRAINING: Training the model ...")
+            train_ds, valid_ds = processed_train_data
+            history = model.fit(
+                train_ds,
+                validation_data=valid_ds,
+                epochs=ModelConfiguration.epochs,
+                callbacks=[lr_cb],
+                verbose=1,
+            )
+            # model.save_weights("model.weights.h5")
+            model.evaluate(valid_ds, return_dict=True, verbose=0)
 
-    else:
-        print("TRAINING: Loading pre-trained model ...")
-        model.load_weights(InputData.trained_model)
-    
-    print("TRAINING: Model is ready to use!")
-    return model
-
+        else:
+            logging.info("TRAINING: Loading pre-trained model ...")
+            model.load_weights(InputData.trained_model)
+        
+        logging.info("TRAINING: Model is ready to use!")
+        return model
+    except Exception as e:
+        logging.error(f"Error: Please check if the *train_model() training.py* exists and work properly. \n{e}")
+        raise
 
