@@ -6,6 +6,15 @@ import spacy
 
 logging = configure_logging()  # Configure logging from config.py
 
+def remove_pii(text, pred_df):
+    # Load spaCy model with NER component
+    nlp = spacy.load("en_core_web_sm")
+    
+    doc = nlp(text)
+    # Identify named entities and replace them
+    replaced_text = " ".join([token.text for token in doc if token.text not in pred_df.words.to_list()])
+    return replaced_text
+
 # saving file with PII items
 def save_predictions(pred_df):
     # SAVE FILE
@@ -14,10 +23,20 @@ def save_predictions(pred_df):
     sub_df.to_csv("submission.csv", index=False)
 
 # remove all PII in text
-def save_processed_data(processed_test_data, pred_df):
-     #TODO **** WITH SPACY SAVE TEXT WITHOUT THE PII WORDS **** #
-    logging.info("PREDICTING: Saving processed data ...")
-    
+def save_processed_data(words, pred_df):
+    try:
+        logging.info("PREDICTING: Saving processed data ...")
+
+        # process the text
+        post_processed_text = words.apply(lambda text: remove_pii(text, pred_df))
+
+        # Save the processed text to a file
+        post_processed_text.to_csv("processed_data.csv", index=False, header=False)
+
+        logging.info("PREDICTING: Processed data saved successfully.")
+    except Exception as e:
+        logging.error(f"Error: {e}. Please check if the *save_processed_data() predict.py* exists and works properly.")
+        raise
 
 
 # Your prediction code here
@@ -43,6 +62,7 @@ def make_predictions(model, processed_test_data):
         token_id_list = []
         label_id_list = []
         token_list = []
+        word_list = []
 
         logging.info("PREDICTING: Post processing data ... ")
         for doc, token_ids, preds, tokens in tqdm(
@@ -64,6 +84,7 @@ def make_predictions(model, processed_test_data):
                 document_list.extend([doc] * len(token_ids))
                 token_id_list.extend(token_ids)
                 label_id_list.extend(preds)
+                word_list.extend(tokens)
 
         # SUBMISSION
         pred_df = pd.DataFrame(
@@ -72,6 +93,7 @@ def make_predictions(model, processed_test_data):
                 "token": token_id_list,
                 "label_id": label_id_list,
                 "token_string": token_list,
+                "words": word_list,
             }
         )
         pred_df = pred_df.rename_axis("row_id").reset_index() # add `row_id` column
@@ -81,7 +103,7 @@ def make_predictions(model, processed_test_data):
         save_predictions(pred_df)
 
         # save text with no PII
-        save_processed_data(processed_test_data, pred_df)
+        save_processed_data(words, pred_df)
 
         logging.info("PREDICTING: Done!")
     except Exception as e:
